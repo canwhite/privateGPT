@@ -1,12 +1,12 @@
-#!/usr/bin/env python3
-import os
-import glob
-from typing import List
-from dotenv import load_dotenv
-from multiprocessing import Pool
-from tqdm import tqdm
+#!/usr/bin/env python3 # 使用python3作为解释器
+import os # 导入os模块，用于操作系统相关的功能
+import glob # 导入glob模块，用于文件名匹配
+from typing import List # 导入List类型注解，用于指定列表类型
+from dotenv import load_dotenv # 导入load_dotenv函数，用于加载环境变量
+from multiprocessing import Pool # 导入Pool类，用于创建进程池
+from tqdm import tqdm # 导入tqdm模块，用于显示进度条
 
-from langchain.document_loaders import (
+from langchain.document_loaders import ( # 从langchain.document_loaders模块导入以下类，用于加载不同格式的文档
     CSVLoader,
     EverNoteLoader,
     PDFMinerLoader,
@@ -20,75 +20,85 @@ from langchain.document_loaders import (
     UnstructuredWordDocumentLoader,
 )
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.docstore.document import Document
-from constants import CHROMA_SETTINGS
+from langchain.text_splitter import RecursiveCharacterTextSplitter # 从langchain.text_splitter模块导入RecursiveCharacterTextSplitter类，用于将文本拆分为固定大小的片段
+from langchain.vectorstores import Chroma # 从langchain.vectorstores模块导入Chroma类，用于创建向量存储
+from langchain.embeddings import HuggingFaceEmbeddings # 从langchain.embeddings模块导入HuggingFaceEmbeddings类，用于创建句子向量
+from langchain.docstore.document import Document # 从langchain.docstore.document模块导入Document类，用于表示文档对象
+from constants import CHROMA_SETTINGS # 从constants模块导入CHROMA_SETTINGS变量，用于配置Chroma数据库
 
 
-load_dotenv()
+load_dotenv() # 调用load_dotenv函数，从.env文件中读取环境变量
 
 
-# Load environment variables
-persist_directory = os.environ.get('PERSIST_DIRECTORY')
-source_directory = os.environ.get('SOURCE_DIRECTORY', 'source_documents')
-embeddings_model_name = os.environ.get('EMBEDDINGS_MODEL_NAME')
-chunk_size = 500
-chunk_overlap = 50
+# Load environment variables
+# 加载环境变量
+persist_directory = os.environ.get('PERSIST_DIRECTORY') # 获取PERSIST_DIRECTORY环境变量的值，赋给persist_directory变量
+source_directory = os.environ.get('SOURCE_DIRECTORY', 'source_documents') # 获取SOURCE_DIRECTORY环境变量的值，如果没有则使用'source_documents'作为默认值，赋给source_directory变量
+embeddings_model_name = os.environ.get('EMBEDDINGS_MODEL_NAME') # 获取EMBEDDINGS_MODEL_NAME环境变量的值，赋给embeddings_model_name变量
+chunk_size = 500 # 定义chunk_size变量为500，表示每个文本片段的最大长度（单位为token）
+chunk_overlap = 50 # 定义chunk_overlap变量为50，表示每个文本片段之间的重叠长度（单位为token）
 
 
-# Custom document loaders
-class MyElmLoader(UnstructuredEmailLoader):
-    """Wrapper to fallback to text/plain when default does not work"""
+# 自定义文档加载器
+class MyElmLoader(UnstructuredEmailLoader): # 定义一个类MyElmLoader，继承自UnstructuredEmailLoader类
+    """Wrapper to fallback to text/plain when default does not work""" # 类的文档字符串，说明这个类的作用是在默认的方式不起作用时，使用text/plain作为备选
 
-    def load(self) -> List[Document]:
-        """Wrapper adding fallback for elm without html"""
-        try:
-            try:
-                doc = UnstructuredEmailLoader.load(self)
-            except ValueError as e:
-                if 'text/html content not found in email' in str(e):
+    def load(self) -> List[Document]: # 定义一个方法load，返回一个Document对象的列表
+        """Wrapper adding fallback for elm without html""" # 方法的文档字符串，说明这个方法的作用是为没有html内容的elm文件添加备选
+        try: # 尝试执行以下代码
+            try: # 尝试执行以下代码
+                doc = UnstructuredEmailLoader.load(self) # 调用父类的load方法，获取文档对象
+            except ValueError as e: # 如果发生ValueError异常，将异常对象赋给e变量
+                if 'text/html content not found in email' in str(e): # 如果异常信息中包含'text/html content not found in email'这个字符串
                     # Try plain text
-                    self.unstructured_kwargs["content_source"]="text/plain"
-                    doc = UnstructuredEmailLoader.load(self)
-                else:
-                    raise
-        except Exception as e:
+                    # 尝试使用纯文本
+                    self.unstructured_kwargs["content_source"]="text/plain" # 将self.unstructured_kwargs字典中的"content_source"键的值设为"text/plain"
+                    doc = UnstructuredEmailLoader.load(self) # 调用父类的load方法，获取文档对象
+                else: # 否则
+                    raise # 抛出异常
+        except Exception as e: # 如果发生任何其他异常，将异常对象赋给e变量
             # Add file_path to exception message
-            raise type(e)(f"{self.file_path}: {e}") from e
+            # 在异常信息中添加文件路径
+            raise type(e)(f"{self.file_path}: {e}") from e # 抛出一个新的异常，类型和原来一样，但是信息中包含文件路径和原来的信息
 
-        return doc
+        return doc  # 返回文档对象
 
 
-# Map file extensions to document loaders and their arguments
-LOADER_MAPPING = {
-    ".csv": (CSVLoader, {}),
-    # ".docx": (Docx2txtLoader, {}),
-    ".doc": (UnstructuredWordDocumentLoader, {}),
-    ".docx": (UnstructuredWordDocumentLoader, {}),
-    ".enex": (EverNoteLoader, {}),
-    ".eml": (MyElmLoader, {}),
-    ".epub": (UnstructuredEPubLoader, {}),
-    ".html": (UnstructuredHTMLLoader, {}),
-    ".md": (UnstructuredMarkdownLoader, {}),
-    ".odt": (UnstructuredODTLoader, {}),
-    ".pdf": (PDFMinerLoader, {}),
-    ".ppt": (UnstructuredPowerPointLoader, {}),
-    ".pptx": (UnstructuredPowerPointLoader, {}),
-    ".txt": (TextLoader, {"encoding": "utf8"}),
+
+# 将文件扩展名映射到文档加载器和它们的参数
+LOADER_MAPPING = { # 定义一个字典变量LOADER_MAPPING
+    ".csv": (CSVLoader, {}), # 将".csv"扩展名映射到CSVLoader类和一个空字典
+    # ".docx": (Docx2txtLoader, {}), # 将".docx"扩展名映射到Docx2txtLoader类和一个空字典（这一行被注释掉了）
+    ".doc": (UnstructuredWordDocumentLoader, {}), # 将".doc"扩展名映射到UnstructuredWordDocumentLoader类和一个空字典
+    ".docx": (UnstructuredWordDocumentLoader, {}), # 将".docx"扩展名映射到UnstructuredWordDocumentLoader类和一个空字典
+    ".enex": (EverNoteLoader, {}), # 将".enex"扩展名映射到EverNoteLoader类和一个空字典
+    ".eml": (MyElmLoader, {}), # 将".eml"扩展名映射到MyElmLoader类和一个空字典
+    ".epub": (UnstructuredEPubLoader, {}), # 将".epub"扩展名映射到UnstructuredEPubLoader类和一个空字典
+    ".html": (UnstructuredHTMLLoader, {}), # 将".html"扩展名映射到UnstructuredHTMLLoader类和一个空字典
+    ".md": (UnstructuredMarkdownLoader, {}), # 将".md"扩展名映射到UnstructuredMarkdownLoader类和一个空字典
+    ".odt": (UnstructuredODTLoader, {}), # 将".odt"扩展名映射到UnstructuredODTLoader类和一个空字典
+    ".pdf": (PDFMinerLoader, {}), # 将".pdf"扩展名映射到PDFMinerLoader类和一个空字典
+    ".ppt": (UnstructuredPowerPointLoader, {}), # 将".ppt"扩展名映射到UnstructuredPowerPointLoader类和一个空字典
+    ".pptx": (UnstructuredPowerPointLoader, {}), # 将".pptx"扩展名映射到UnstructuredPowerPointLoader类和一个空字典
+    ".txt": (TextLoader, {"encoding": "utf8"}), # 将".txt"扩展名映射到TextLoader类和一个包含"encoding":"utf8"键值对的字典
     # Add more mappings for other file extensions and loaders as needed
+    # 根据需要添加更多的文件扩展名和加载器的映射
 }
 
 
-def load_single_document(file_path: str) -> Document:
+# 定义一个函数load_single_document，接受一个字符串类型的参数file_path，返回一个Document类型的对象
+def load_single_document(file_path: str) -> Document: 
+     # 从file_path中获取文件扩展名，并在前面加上"."，赋给ext变量
     ext = "." + file_path.rsplit(".", 1)[-1]
-    if ext in LOADER_MAPPING:
-        loader_class, loader_args = LOADER_MAPPING[ext]
-        loader = loader_class(file_path, **loader_args)
-        return loader.load()[0]
+    # 如果ext在LOADER_MAPPING字典中
+    if ext in LOADER_MAPPING: 
+        # 从LOADER_MAPPING字典中获取对应的加载器类和参数，赋给loader_class和loader_args变量
+        loader_class, loader_args = LOADER_MAPPING[ext] 
+        loader = loader_class(file_path, **loader_args) # 使用loader_class和loader_args创建一个加载器对象，赋给loader变量
+        return loader.load()[0] # 调用加载器的load方法，获取文档对象列表，并返回第一个元素
 
-    raise ValueError(f"Unsupported file extension '{ext}'")
+    raise ValueError(f"Unsupported file extension '{ext}'") # 如果ext不在LOADER_MAPPING字典中，抛出一个ValueError异常，提示不支持的文件扩展名
+
 
 
 def load_documents(source_dir: str, ignored_files: List[str] = []) -> List[Document]:
