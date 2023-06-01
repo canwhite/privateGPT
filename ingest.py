@@ -41,9 +41,9 @@ chunk_overlap = 50 # 定义chunk_overlap变量为50，表示每个文本片段�
 
 # 自定义文档加载器
 class MyElmLoader(UnstructuredEmailLoader): # 定义一个类MyElmLoader，继承自UnstructuredEmailLoader类
-    """Wrapper to fallback to text/plain when default does not work""" # 类的文档字符串，说明这个类的作用是在默认的方式不起作用时，使用text/plain作为备选
-
-    def load(self) -> List[Document]: # 定义一个方法load，返回一个Document对象的列表
+    #这个类的作用是在默认的方式不起作用时，使用text/plain作为备选
+    # 定义一个方法load，返回一个Document对象的列表
+    def load(self) -> List[Document]: 
         """Wrapper adding fallback for elm without html""" # 方法的文档字符串，说明这个方法的作用是为没有html内容的elm文件添加备选
         try: # 尝试执行以下代码
             try: # 尝试执行以下代码
@@ -186,27 +186,47 @@ def does_vectorstore_exist(persist_directory: str) -> bool:
     # 否则返回False值
     return False
 
+# 定义一个函数main，不接受任何参数，也不返回任何值
 def main():
-    # Create embeddings
+    # 创建一个HuggingFaceEmbeddings对象，传入embeddings_model_name变量指定的模型名称，赋给embeddings变量
     embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
 
+    # 如果persist_directory变量指定的目录下存在向量存储（调用does_vectorstore_exist函数判断）
     if does_vectorstore_exist(persist_directory):
+        # 更新并本地存储向量存储
         # Update and store locally vectorstore
+        # 打印一条信息，显示正在向persist_directory变量指定的目录下的现有向量存储中添加数据
         print(f"Appending to existing vectorstore at {persist_directory}")
+        # 创建一个Chroma对象，传入persist_directory、embeddings和CHROMA_SETTINGS变量指定的参数，赋给db变量
         db = Chroma(persist_directory=persist_directory, embedding_function=embeddings, client_settings=CHROMA_SETTINGS)
+        # 调用db对象的get方法，获取向量存储中的集合对象，赋给collection变量
         collection = db.get()
+        # 调用process_documents函数，
+        # 传入collection对象中的'metadatas'字段中的每个元素的'source'字段组成的列表作为ignored_files参数，获取拆分后的文本对象列表，赋给texts变量
         texts = process_documents([metadata['source'] for metadata in collection['metadatas']])
+        # 打印一条信息，显示正在创建向量，可能需要一些时间
         print(f"Creating embeddings. May take some minutes...")
+        # 调用db对象的add_documents方法，传入texts参数，将文本对象添加到向量存储中
+        # 这里主要是添加
         db.add_documents(texts)
-    else:
+    else: # 否则
+        # 创建并本地存储向量存储
         # Create and store locally vectorstore
+        # 打印一条信息，显示正在创建新的向量存储
         print("Creating new vectorstore")
+        # 调用process_documents函数，获取拆分后的文本对象列表，赋给texts变量
         texts = process_documents()
+        # 打印一条信息，显示正在创建向量，可能需要一些时间
         print(f"Creating embeddings. May take some minutes...")
+        # 使用Chroma类的from_documents方法，传入texts、embeddings、persist_directory和CHROMA_SETTINGS变量指定的参数，创建一个Chroma对象，并赋给db变量
+        # 这里是创建
         db = Chroma.from_documents(texts, embeddings, persist_directory=persist_directory, client_settings=CHROMA_SETTINGS)
+    # 调用db对象的persist方法，将向量存储持久化到磁盘上
     db.persist()
+    # 将db变量设为None，释放内存空间
     db = None
 
+    # 打印一条信息，显示摄入过程完成，并提示可以运行privateGPT.py文件来查询文档
     print(f"Ingestion complete! You can now run privateGPT.py to query your documents")
 
 
