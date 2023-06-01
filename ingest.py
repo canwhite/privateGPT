@@ -168,17 +168,22 @@ def process_documents(ignored_files: List[str] = []) -> List[Document]:
     # 返回texts列表
     return texts
 
+# 定义一个函数does_vectorstore_exist，接受一个字符串类型的参数persist_directory，返回一个布尔类型的值
+# 主要是为了判断是不是要重新创建向量库
 def does_vectorstore_exist(persist_directory: str) -> bool:
-    """
-    Checks if vectorstore exists
-    """
+    # 这个函数的作用是检查向量存储是否存在
+    # 如果persist_directory变量指定的目录下存在一个名为'index'的子目录
     if os.path.exists(os.path.join(persist_directory, 'index')):
+        # 如果persist_directory变量指定的目录下存在两个名为'chroma-collections.parquet'和'chroma-embeddings.parquet'的文件
         if os.path.exists(os.path.join(persist_directory, 'chroma-collections.parquet')) and os.path.exists(os.path.join(persist_directory, 'chroma-embeddings.parquet')):
+            # 使用glob模块的glob函数，匹配persist_directory变量指定的目录下'index'子目录中所有以'.bin'或'.pkl'结尾的文件路径，返回一个列表，赋给list_index_files变量
             list_index_files = glob.glob(os.path.join(persist_directory, 'index/*.bin'))
             list_index_files += glob.glob(os.path.join(persist_directory, 'index/*.pkl'))
-            # At least 3 documents are needed in a working vectorstore
+            # 如果list_index_files列表中的元素个数大于3（表示至少有3个文档在向量存储中）
             if len(list_index_files) > 3:
+                # 返回True值
                 return True
+    # 否则返回False值
     return False
 
 def main():
